@@ -15,10 +15,10 @@ Ecran 2x16 LCD RGB
 ![Setup](http://blueb.fr/RTK/docs/photos/Boitier-A.jpg)
 
 Sur le CLD, en alternance :
-* [Latitude/Longitude][NombreSat/FixType]
-* [Latitude/Longitude][Altitude/HDop]
-* [IP Wifi][IP filaire]
-* [%CPU/%MEM][Temperature/Frequence]<br>
+* [Latitude / Longitude]  -  [NombreSat / FixType]
+* [Latitude / Longitude]  -  [Altitude / HDop]
+* [IP Wifi]  -  [IP filaire]
+* [%CPU / %MEM]  -  [Temperature / Frequence]<br>
 ![lcd-sat](http://blueb.fr/RTK/docs/photos/lcd-sat.jpg)
 ![lcd-hdop](http://blueb.fr/RTK/docs/photos/lcd-hdop.jpg)
 ![lcd-ip](http://blueb.fr/RTK/docs/photos/lcd-ip.jpg)
