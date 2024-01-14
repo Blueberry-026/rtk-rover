@@ -26,11 +26,15 @@
 # | VERS  | DATE       | EVOLUTIONS
 # |-------+------------+------------------------------------------------
 # |       |            |
-# | v0.3x | 10/01/2024 | * Correction de la réémision du flux serie vers F9P
+# | v0.3x | 15/01/2024 | * Correction de la réémision du flux serie vers F9P
 # |       |            | - Changement des affichages LCD
 # |       |            | + Conversion auto des NMEA en GPX en fin de boucle
 # |       |            | + Ammélioration du traitement des exceptions/journal de traces
 # |       |            | * Lecture de 2 boutons simultanés (pour shutdown)
+# |       |            | * Refonte de la conversion GPX
+# |       |            | + Ajout de la verif checksum des trame
+# |       |            | - Meilleure gestion du reseau - detection du Wifi
+# |       |            | - Ajout d'infos LCD
 # |       |            |
 # | v0.2x | 04/01/2024 | + Recuperation de la table centipede
 # |       |            | + Choix auto de la base la plus proche
@@ -61,12 +65,12 @@
 import sys
 
 sys.path.append('../')
+sys.path.append('../lib')
 import rgb1602
 import time
 import RPi.GPIO as GPIO
 import serial
 import psutil
-import gpx_lib as gp
 import socket
 import binascii
 import random
@@ -76,11 +80,15 @@ import shutil
 import os
 import haversine as hs
 import glob
+import subprocess
+import base64
 from datetime import datetime
 from os.path import exists
 from gpiozero import CPUTemperature
 
-_version    = "0.32"
+_version    = "0.36"
+
+appStatus   = ["Init", "GPS", "DGPS", "RTK", "ERR"]
 
 posFix      = ["NOFX", "GPS ", "DGPS", "N/A ", "RTKx", "RTKf", "INS "]
 trc_IN      = 0
@@ -89,6 +97,9 @@ trc_OUT     = 2
 trc_HDL     = 0
 
 lcd = rgb1602.RGB1602(16, 2)
+
+glbTCPcounter = 0
+glbUSBcounter = 0
 
 glbLat      = 0.0
 glbLon      = 0.0
@@ -147,6 +158,8 @@ btnDOWN     = 0x04
 btnLEFT     = 0x10
 btnRIGHT    = 0x20
 
+wifiSSID =""
+wifiPwd=""
 
 baseRecord = [  # STR;ASSAS;Ruan;RTCM3;1004,1005,1006;2;GLO+GAL+SBS+BDS+GPS;NONE;FRA;48.096;1.894;0;0;NTRIP RTKBase U-blox_ZED-F9P 2.4.2 1.13;none;N;N;15200;CentipedeRTK
     "typ",      # STR (the only acceptable string)
@@ -228,6 +241,202 @@ ggaRecord = [   # $GNGGA,122220.00,4542.4812848,N,00451.2467166,E,2,12, 0.60,188
 
 
 # =============================================================================
+# 
+# -----------------------------------------------------------------------------
+#
+def cryptEncode(key, clear):
+    enc = []
+    for i in range(len(clear)):
+        key_c = key[i % len(key)]
+        enc_c = chr((ord(clear[i]) + ord(key_c)) % 256)
+        enc.append(enc_c)
+    return base64.urlsafe_b64encode("".join(enc).encode()).decode()
+
+def cryptDecode(key, enc):
+    dec = []
+    enc = base64.urlsafe_b64decode(enc).decode()
+    for i in range(len(enc)):
+        key_c = key[i % len(key)]
+        dec_c = chr((256 + ord(enc[i]) - ord(key_c)) % 256)
+        dec.append(dec_c)
+    return "".join(dec)
+
+# =============================================================================
+# lcdSetColor
+# -----------------------------------------------------------------------------
+#
+def lcdSetColor(status):
+    if status == "INIT":            #jaune
+        lcd.setRGB(150, 150, 0)
+    elif status == "GPS":
+        lcd.setRGB(50,  50, 150)
+    elif status == "DGPS":
+        lcd.setRGB(0,  0, 150)
+    elif status == "RTKx":
+        lcd.setRGB(0, 150, 0)
+    elif status == "RTKf":
+        lcd.setRGB(0, 150, 80)
+    elif status == "NOFIX":
+        lcd.setRGB(150, 150, 150)
+    elif status == "ERR":           #rouge
+        lcd.setRGB(150, 0, 0)
+    else:
+        lcd.setRGB(40, 40, 40)
+        
+# =============================================================================
+# gpxExtractFileds
+# -----------------------------------------------------------------------------
+#
+def gpxExtractFileds(lcFields, gpxPt):
+    global tmFirst, tmLast, dtFirst, dtLast
+
+    _cod = lcFields[1][3:6]
+    fixType = ["Fix not available",
+               "GPS fix",
+               "Differential GPS fix (values above 2 are 2.3 features)",
+               "PPS fix",
+               "RTK fix",
+               "RTK float",
+               "Estimated (dead reckoning)",
+               "Manual input mode",
+               "Simulation mode"]
+    try:
+        _val = int(lcFields[6])
+        if _val > 0:
+            gpxPt["_tim"]  = lcFields[1][0:2] + ":" + lcFields[1][2:4] + ":" + lcFields[1][4:6]
+            gpxPt["_lat"]  = DecimalDegrees(lcFields[2])
+            gpxPt["_lon"]  = DecimalDegrees(lcFields[4])
+            gpxPt["_alt"]  = float(lcFields[9])
+            gpxPt["_dop"]  = float(lcFields[8])
+            gpxPt["_sat"]  = int(lcFields[7])
+            gpxPt["_fix"]  = int(lcFields[6])
+            #gpxTraitePostion(gpxPt["_lat"], gpxPt["_lon"], gpxPt["_tim"])
+            dNBS=0
+        else:
+            _valid = " !!!"
+    except:
+        print("\n   -> GGA: ERREUR de de decodage trame %s" % str(lcFields))
+
+# =============================================================================
+# gpxFill
+# -----------------------------------------------------------------------------
+# Selon le code recu, ecrit soit l'entete du fichier GPX, soit
+# le point courant soit les lignes de fin de fichier
+#
+def gpxFill(handler, fGpx, code, pt):
+    Trace(trc_IN, sys._getframe().f_code.co_name)
+    if code == 'header':
+        handler.write("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n")
+        handler.write("<gpx version=\"1.0\">\n")
+        handler.write("   <trk>\n")
+        handler.write("      <name>" + fGpx + "</name>\n")
+        handler.write("      <trkseg>\n")
+    elif code == 'point':
+        if ((pt["_lat"] != 0) and (pt["_lon"] != 0)):
+            handler.write("         <trkpt lat='%f' lon='%f'>\n" % (pt["_lat"], pt["_lon"]))
+            handler.write("            <time>%sT%sZ</time>\n" % (pt["_dat"], pt["_tim"]))
+            handler.write("            <ele>%d</ele>\n" % pt["_alt"])
+            handler.write("            <speed>%06.2f</speed>\n" % pt["_vit"])
+            handler.write("            <hdop>%06.2f</hdop>\n" % pt["_dop"])
+            handler.write("            <fix>%s</fix>\n" % pt["_fix"])
+            handler.write("            <sat>%d</sat>\n" % pt["_sat"])
+            handler.write("         </trkpt>\n")
+        #else:
+        #    print("Position 0/0 non ecrite")
+    elif code == 'footer':
+        handler.write("      </trkseg>\n")
+        handler.write("   </trk>\n")
+        handler.write("</gpx>\n")
+    else:
+         Trace(trc_OUT, "FillGpx : code ["+code+"] erroné")
+    Trace(trc_OUT, sys._getframe().f_code.co_name)
+
+
+# =============================================================================
+# gpxTraitePostion
+# -----------------------------------------------------------------------------
+#
+def gpxTraitePostion(lcLat, lcLon, lcTim):
+    global dDST, dDAT, dLAT, dLON, dVIT
+    global totDST, totSEC
+
+    R = 6373.0
+
+    if (dLAT == 0):
+        dDAT = datetime.strptime(lcTim, '%H:%M:%S')
+        dLAT = lcLat
+        dLON = lcLon
+    dSEC = (datetime.strptime(lcTim, '%H:%M:%S') - dDAT).total_seconds()
+    if 1:#dSEC > 0:
+
+        deltaLat = abs(lcLat - dLAT)
+        deltaLon = abs(lcLon - dLON)
+
+        try:
+            a = (sin(deltaLat / 2)) ** 2 + cos(lcLat) * cos(dLAT) * (sin(deltaLon / 2)) ** 2
+            c = 2 * atan2(sqrt(a), sqrt(1 - a))
+            dDST = R * c
+            dSEC = (datetime.strptime(lcTim, '%H:%M:%S') - dDAT).total_seconds()
+            dVIT = dDST / dSEC
+            totSEC += dSEC
+            totDST += dDST
+        except:
+            dVIT = -1
+            dDST = -1
+            dSEC = -1
+        dDAT = datetime.strptime(lcTim, '%H:%M:%S')
+    else:
+        dVIT = -1
+        dDST = -1
+        dSEC = -1
+        print("a")
+
+# =============================================================================
+#
+# -----------------------------------------------------------------------------
+#
+def nmeaAnalyzeFile(gga,fname):
+    global tmFirst, tmLast, dtFirst, dtLast
+
+    Trace(trc_IN, sys._getframe().f_code.co_name)
+    ficGpx=glbRootPath+"/gpx/"+fname+".gpx"
+    if (os.path.exists(ficGpx)):
+        Trace(trc_MSG, "Fichier "+ficGpx+" déjà généré")
+    else:
+        Trace(trc_MSG, "Traitement de "+ficGpx)
+        gpxHdl=open(ficGpx,"w")
+    
+        gpxPoint = {"_dat" :"",
+                    "_tim" :"",
+                    "_lat":0.0,
+                    "_lon":0.0,
+                    "_vit":0.0,
+                    "_alt":0.0,
+                    "_dop":0.0,
+                    "_sat":0,
+                    "_fix":"-" }
+        gpxFill(gpxHdl, ficGpx, 'header',gpxPoint)
+        ctrLINE=0
+        for line in gga:
+            print("\rAnalyse ligne [%d] ..." % ctrLINE, end='')
+            line = line.rstrip('\n')[16:]
+            ctrLINE+=1
+            
+            # Separation de la ligne en champs CSV
+            #
+            fields = line.split(",")
+            if (len(fields)<5):
+                continue
+            _cod=fields[0][3:6]
+            if (_cod == "GGA"):
+                gpxExtractFileds(fields,gpxPoint)
+                gpxFill(gpxHdl, ficGpx, 'point', gpxPoint)
+        FMT_T = "%H:%M:%S"
+        gpxFill(gpxHdl, ficGpx, 'footer',gpxPoint)
+        gpxHdl.close()
+    Trace(trc_OUT, sys._getframe().f_code.co_name)    
+    
+# =============================================================================
 # DecimalDegrees
 # -----------------------------------------------------------------------------
 # => Format NMEA recu :
@@ -252,11 +461,11 @@ def DecimalDegrees(strPos):
 
 
 # =======================================================================
-# CustomChar
+# lcdCustomChar
 # -----------------------------------------------------------------------
 #
 #
-def CustomChar():
+def lcdCustomChar():
     Trace(trc_IN, sys._getframe().f_code.co_name)
     cHaut = [0b00011,
              0b00011,
@@ -290,10 +499,10 @@ def CustomChar():
 
 
 # ==================================================================================================================
-# writeINI
+# iniWrite
 # ------------------------------------------------------------------------------------------------------------------
 #
-def writeINI():
+def iniWrite():
     global cstIP, cstPort, cstUser, cstPwd, cstPoint
     global dmpSize, lcdFreeze, defLat, defLon, glbOffset, glbDureeMax, glbTramesNMEA
 
@@ -313,12 +522,12 @@ def writeINI():
 
 
 # ==================================================================================================================
-# readINI
+# iniRead
 # ------------------------------------------------------------------------------------------------------------------
 #
-def readINI():
+def iniRead():
     global cstIP, cstPort, cstUser, cstPwd, cstPoint
-    global dmpSize, lcdFreeze, defLat, defLon, glbOffset, glbDureeMax, glbSzMaxNMEA
+    global dmpSize, lcdFreeze, defLat, defLon, glbOffset, glbDureeMax, glbSzMaxNMEA,wifiSSID,wifiPwd
 
     Trace(trc_IN, sys._getframe().f_code.co_name)
 
@@ -354,7 +563,8 @@ def readINI():
         glbRootPath = config['General']['rootpath']
         defLat      = float(config['Position']['latitude'])
         defLon      = float(config['Position']['longitude'])
-
+        wifiSSID    = config['Wifi']['reseau']
+        wifiPwd     = config['Wifi']['password']
         if (config['General']['offset'] == "1"):
             glbOffset = random.random()
         else:
@@ -411,11 +621,11 @@ def Trace(xsens, fct):
 
 
 # =======================================================================
-# Init_LCD
+# lcdInit
 # -----------------------------------------------------------------------
 #
 #
-def Init_LCD():
+def lcdInit():
     Trace(trc_IN, sys._getframe().f_code.co_name)
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
@@ -435,7 +645,7 @@ def Init_LCD():
 # -----------------------------------------------------------------------
 # Read the key value
 #
-def read_LCD_buttons():
+def lcdReadButton():
     Trace(trc_IN, sys._getframe().f_code.co_name)
 
     ioSELECT = 16
@@ -467,7 +677,14 @@ def read_LCD_buttons():
 # DecodeGGA
 # -----------------------------------------------------------------------
 # $GNGGA,122220.00,4542.4812848,N,00451.2467166,E,2,12,0.60,188.552,M,47.358,M,,0136*4A
-#
+#    "qlty",     # 6 GPS Quality indicator:
+                #     0: Fix not valid
+                #     1: GPS fix
+                #     2: Differential GPS fix (DGNSS), SBAS, OmniSTAR VBS, Beacon, RTX in GVBS mode
+                #     3: Not applicable
+                #     4: RTK Fixed, xFill
+                #     5: RTK Float, OmniSTAR XP/HP, Location RTK, RTX
+                #     6: INS Dead reckoning
 def DecodeGGA(trame):
     global glbLat, glbLon, glbFix, glbNSat, glbHeight, glbHDop, glbLastGGA
 
@@ -475,6 +692,7 @@ def DecodeGGA(trame):
     Trace(trc_MSG, gnssType[trame[1:3]])
     #   print (trame)
     glbLastGGA = trame
+    glbFix=0
     try:
         fields = trame.split(",")
         fields = dict(zip(ggaRecord, fields))
@@ -482,8 +700,11 @@ def DecodeGGA(trame):
         lcLon = DecimalDegrees(fields["lon"])
         lcFix = int(fields["qlty"])
         lcNSat = int(fields["nsat"])
-        lcHeight = int(float(fields["hgth"]))
         lcHDop = float(fields["hdop"])
+        if (len(fields["hgth"])>0):
+            lcHeight = int(float(fields["hgth"]))
+        else:
+            lcHeight = 0
         if ((lcLat < 50) & (lcLat > 40) & (lcLon > 0) & (lcLon < 6)):
             glbLat = lcLat + glbOffset
             glbLon = lcLon + glbOffset
@@ -493,28 +714,23 @@ def DecodeGGA(trame):
             glbHDop = lcHDop
 
         if (glbFix == 1):
-            lcd.setRGB(100, 100, 100)
+            lcdSetColor("GPS")
         elif (glbFix == 2):
-            lcd.setRGB(0, 150, 0)
-        elif (glbFix >= 4):
-            lcd.setRGB(0, 150, 0)
+            lcdSetColor("DGPS")
+        elif (glbFix == 4):
+            lcdSetColor("RTKx")
+        elif (glbFix == 5):
+            lcdSetColor("RTKf")
         else:
-            lcd.setRGB(0, 0, 120)
+            lcdSetColor("NOFIX")
     except Exception as e:
         Trace(trc_MSG, sys._getframe().f_code.co_name + " exception [" + repr(e) + "]")
-        lcd.setRGB(0, 0, 120)
-        # glbLat    = 0.0
-        # glbLon    = 0.0
-        # glbFix    = 0
-        # glbNSat   = 0
-        # glbHeight = 0
-        # glbHDop   = 0
-        pass
+        #lcdSetColor("ERR")
     Trace(trc_OUT, sys._getframe().f_code.co_name)
 
 
 # =======================================================================
-# GetIPaddress
+# sysGetIPaddress
 # -----------------------------------------------------------------------
 # 'lo': [
 #    snicaddr(family=<AddressFamily.AF_INET: 2>, address='127.0.0.1', netmask='255.0.0.0', broadcast=None, ptp=None),
@@ -549,7 +765,7 @@ def DecodeGGA(trame):
 #     inet6 fe80::12e4:1071:4618:eb2c/64 scope link 
 #        valid_lft forever preferred_lft forever
 
-def GetIPaddress():
+def sysGetIPaddress():
     global glbFreeze
 
     Trace(trc_IN, sys._getframe().f_code.co_name)
@@ -568,15 +784,37 @@ def GetIPaddress():
     lcd.write(0)
 
     glbFreeze = lcdFreeze
-    Trace(trc_MSG, "> GetIPaddress: [" + l1 + "] [" + l2 + "]")
+    Trace(trc_MSG, "> sysGetIPaddress: [" + l1 + "] [" + l2 + "]")
     Trace(trc_OUT, sys._getframe().f_code.co_name)
 
 
+# =============================================================================
+# nmeaCalculChecksun
+# -----------------------------------------------------------------------------
+# Calcul du checksum attendu de la ligne en cours
+#
+def nmeaCalculChecksun(ln):
+    encoded_string = ln.encode()
+    byte_array = bytearray(encoded_string)
+    
+    # Calcul du checksum attendu de la ligne en cours
+    #   (XOR entre tous les caractères entre le $ et l'* non compris)
+    #
+    cks = 0
+    for i in range(1, len(byte_array) - 3):
+        cks ^= byte_array[i]
+    
+    if (cks==int(ln[-2:],16)):
+        ret=True
+    else:
+        ret=False
+    return ret
+                       
 # =======================================================================
-# InfoSys
+# sysGetOsInfos
 # -----------------------------------------------------------------------
 #
-def InfoSys():
+def sysGetOsInfos():
     global glbFreeze
 
     Trace(trc_IN, sys._getframe().f_code.co_name)
@@ -587,7 +825,7 @@ def InfoSys():
     svmem = psutil.virtual_memory()
 
     l1 = format("CPU:%2.0f%% MEM:%2.0f%%" % (psutil.cpu_percent(), svmem.percent))
-    l2 = format("T:%2.0fc F:%dHz" % (cpu.temperature, cpufreq.current))
+    l2 = format("T:%2.0f°c F:%dHz" % (cpu.temperature, cpufreq.current))
 
     lcd.setCursor(0, 0)
     lcd.printout(l1)
@@ -601,21 +839,36 @@ def InfoSys():
 
 
 # =======================================================================
-# SearchUSBport
+# sysListUsbPort
 # -----------------------------------------------------------------------
 #
-def SearchUSBport():
+def sysListUsbPort():
     Trace(trc_IN, sys._getframe().f_code.co_name)
     usbPort = ""
     for port in range(0, 10):
         ttyPort = "/dev/ttyUSB" + str(port)
         if exists(ttyPort):
             usbPort = ttyPort
-            Trace(trc_MSG, "> SearchUSBport: Port serie=" + usbPort)
+            Trace(trc_MSG, "> sysListUsbPort: Port serie=" + usbPort)
             break
     return (usbPort)
     Trace(trc_OUT, sys._getframe().f_code.co_name)
 
+
+# =======================================================================
+# rtkPing
+# -----------------------------------------------------------------------
+#
+def rtkPing(server):
+    Trace(trc_IN, sys._getframe().f_code.co_name)
+    
+    if (os.system('ping -c 1 '+server) == 0):
+        isServerOk=True
+    else:
+        isServerOk=False
+    
+    Trace(trc_OUT, sys._getframe().f_code.co_name)
+    return isServerOk
 
 # =======================================================================
 # rtkGetNearestBase
@@ -644,7 +897,7 @@ def rtkGetNearestBase(name):
                 if (fields["nmea"] == "1"):
                     baseUplGGA = True
                 else:
-                    baseUplGGA = True
+                    baseUplGGA = False
     Trace(trc_OUT, sys._getframe().f_code.co_name)
 
 
@@ -654,6 +907,7 @@ def rtkGetNearestBase(name):
 #
 def rtkBaseConnect(name):
     global glbRcv
+    global glbTCPcounter
 
     Trace(trc_IN, sys._getframe().f_code.co_name)
     BaseConnect_HDR = "ICY 200 OK"
@@ -680,8 +934,8 @@ def rtkBaseConnect(name):
 
     # Continously read data sent by base
     #
-    file = open(glbRootPath + '/datas/base-dump.dmp', 'w')
-    rxCounter = 0
+    file = open(glbRootPath + '/datas/base-dump.bin', 'wb')
+    glbTCPcounter = 0
 
     ggaTrame = " GNGGA,150412.00,4544.6231923,N,00450.0667313,E,2,12,0.62,188.042,M,47.358,M,,0136*43"
     ggaHeader = "Ntrip-GGA: {}\r\n".format(ggaTrame)
@@ -693,7 +947,7 @@ def rtkBaseConnect(name):
             rx = sock.recv(1024)
             if (len(rx) > 0):
                 glbRcv += rx
-                rxCounter = rxCounter + len(rx)
+                glbTCPcounter = glbTCPcounter + len(rx)
                 # print(binascii.hexlify(glbRcv))
                 dmp = str(binascii.hexlify(rx))
 
@@ -705,9 +959,9 @@ def rtkBaseConnect(name):
 
                 # We limit dump file to 'dmpSize' Ko
                 #
-                if (rxCounter < (dmpSize * 1024)):
-                    file.write(dmp)
-                jrn = format("TCP: Reception [%d] Total [%d ko]" % (len(rx), int(rxCounter / 1024)))
+                if (glbTCPcounter < (dmpSize * 1024)):
+                    file.write(rx)
+                jrn = format("TCP: Reception [%d] Total [%d ko]" % (len(rx), int(glbTCPcounter / 1024)))
                 Trace(trc_MSG, jrn)
                 # Trace(trc_MSG, binascii.hexlify(glbRcv)[50:])
             else:
@@ -724,56 +978,100 @@ def rtkGetBaseList(name):
     global glbLstBases
 
     Trace(trc_IN, sys._getframe().f_code.co_name)
-    BaseListe_HDR = "SOURCETABLE 200 OK"
-    BaseListe_REQ = 'GET / HTTP/1.0 \n' + \
-                    'Host: ' + cstUser + ':' + cstPwd + '\n' + \
-                    'User-Agent: NTRIP Rover' + "\n" + \
-                    'Accept: /' + "\n" + \
-                    'Authorization: Basic ' + cstUser + ':' + cstPwd + "\n\n"
-
-    # Init connexion to base
-    #
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(5.0)
-    server_address = (cstIP, cstPort)
-    sock.settimeout(2)
-    sock.connect(server_address)
-
-    # Send base list request
-    #
-    req = bytes(BaseListe_REQ, encoding='utf-8')
-    jrn = format('Connect to [%s] port [%s] req [%s]' % (cstIP, cstPort, req))
-    Trace(trc_MSG, jrn)
-    sock.sendall(req)
-
-    # Read table (~100 000 bytes)
-    #
-    rxCounter = 0
-    data = sock.recv(len(BaseListe_HDR))
-    if (data.decode() == BaseListe_HDR):
-        Trace(trc_MSG, "Receiving caster table ok")
-        while True:
-            data = sock.recv(1024)
-            rxCounter = rxCounter + len(data)
-            # print ("< " + data.decode())
-            glbLstBases = glbLstBases + data.decode()
-            if len(data) == 0:
-                break
+    
+    response = os.system("ping -c 1 " + cstIP)
+    if response == 0:
+        jrn=format(f"{cstIP} is up!")
+        Trace(trc_MSG, jrn)
+    
+        BaseListe_HDR = "SOURCETABLE 200 OK"
+        BaseListe_REQ = 'GET / HTTP/1.0 \n' + \
+                        'Host: ' + cstUser + ':' + cstPwd + '\n' + \
+                        'User-Agent: NTRIP Rover' + "\n" + \
+                        'Accept: /' + "\n" + \
+                        'Authorization: Basic ' + cstUser + ':' + cstPwd + "\n\n"
+    
+        # Init connexion to base
+        #
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        server_address = (cstIP, cstPort)
+        sock.settimeout(2)
+        sock.connect(server_address)
+    
+        # Send base list request
+        #
+        req = bytes(BaseListe_REQ, encoding='utf-8')
+        jrn = format('Connect to [%s] port [%s] req [%s]' % (cstIP, cstPort, req))
+        Trace(trc_MSG, jrn)
+        sock.sendall(req)
+    
+        # Read table (~100 000 bytes)
+        #
+        glbTCPcounter = 0
+        data = sock.recv(len(BaseListe_HDR))
+        if (data.decode() == BaseListe_HDR):
+            Trace(trc_MSG, "Receiving caster table ok")
+            while True:
+                data = sock.recv(1024)
+                glbTCPcounter = glbTCPcounter + len(data)
+                # print ("< " + data.decode())
+                glbLstBases = glbLstBases + data.decode()
+                if len(data) == 0:
+                    break
+        else:
+            Trace(trc_MSG, ">>ERROR receiving caster table")
+        jrn = format('Table received [%d] bytes / [%d] bases' % (glbTCPcounter, len(glbLstBases)))
+        Trace(trc_MSG, jrn)
+    
+        # Save caster table
+        #
+        file = open(glbRootPath + '/datas/caster-table.csv', 'w')
+        file.write(glbLstBases)
+        file.close()
+        glbLstBases = glbLstBases.split("\n")
+        sock.close()
     else:
-        Trace(trc_MSG, ">>ERROR receiving caster table")
-    jrn = format('Table received [%d] bytes / [%d] bases' % (rxCounter, len(glbLstBases)))
-    Trace(trc_MSG, jrn)
-
-    # Save caster table
-    #
-    file = open(glbRootPath + '/datas/caster-table.csv', 'w')
-    file.write(glbLstBases)
-    file.close()
-    glbLstBases = glbLstBases.split("\n")
-    sock.close()
+        jrn=format(f"{cstIP} is down!")
+        Trace(trc_MSG, jrn)
     Trace(trc_OUT, sys._getframe().f_code.co_name)
 
 
+# =======================================================================
+# sysWifiStatus
+# -----------------------------------------------------------------------
+#
+def sysWifiStatus():
+    Trace(trc_IN, sys._getframe().f_code.co_name)
+    l1="Nw:"+str(glbNetworkOk) + " In:"+str(glbInitRTKok)
+    l2=subprocess.check_output(['iwgetid -r'], shell=True).decode('utf-8').strip()
+ 
+    lcd.clear()
+    lcd.setCursor(0, 0)
+    lcd.printout(l1)
+    lcd.setCursor(0, 1)
+    lcd.printout(l2)
+    Trace(trc_MSG, "[" + l1 + "] [" + l2 + "]")
+    glbFreeze = lcdFreeze
+    Trace(trc_OUT, sys._getframe().f_code.co_name)
+    
+# =======================================================================
+# sysBwUsed
+# -----------------------------------------------------------------------
+#
+def sysBwUsed():
+    Trace(trc_IN, sys._getframe().f_code.co_name)
+    l1=format("USB:%07.2fKo" % (glbUSBcounter/1024))
+    l2=format("TCP:%07.2fKo" % (glbTCPcounter/1024))
+    lcd.clear()
+    lcd.setCursor(0, 0)
+    lcd.printout(l1)
+    lcd.setCursor(0, 1)
+    lcd.printout(l2)
+    Trace(trc_MSG, "[" + l1 + "] [" + l2 + "]")
+    glbFreeze = lcdFreeze
+    Trace(trc_OUT, sys._getframe().f_code.co_name)
+    
 # =======================================================================
 # gpxConvert
 # -----------------------------------------------------------------------
@@ -782,6 +1080,8 @@ def gpxConvert():
     Trace(trc_IN, sys._getframe().f_code.co_name)
     fileMask = glbRootPath+"/nmea/*.000"
 
+    ggaLines=[]
+    ctr=0
     if (len(glob.glob(fileMask)) == 0):
         print("   ERREUR: Aucun fichier trouve a l'emplacement designe [" + fileMask+"]")
     else:
@@ -789,44 +1089,60 @@ def gpxConvert():
 
             # Pour chaque fichier *.000 trouvé, compiler tous les numéros suivants dans un seul
             #
+            lcd.clear()
+            l1 = "GPX Convert("+str(ctr)+")"
+            lcd.setCursor(0, 0)
+            lcd.printout(l1)
+
             fragCtr = 0
-            compil=format("%s-compil.nmea" % (fName.split(".")[0]))
-            ficOut = open(compil,"w")
             while (True):
                 try:
                     baseName=format("%s.%03d" % (fName.split(".")[0],fragCtr))
+                    print(">>"+baseName)
                     if (os.path.exists(baseName)):
+                        ctr+=1
+                        l1 = "GPX Convert("+str(ctr)+")"
+                        lcd.setCursor(0, 0)
+                        lcd.printout(l1)
+                        l2 = baseName.split("-")[1][:14]
+                        lcd.setCursor(0, 1)
+                        lcd.printout(l2)
+                        Trace(trc_MSG, "[" + l1 + "] [" + l2 + "]")
+                        
                         fragCtr=fragCtr+1
                         with open(baseName) as f:
                             lines = f.read()
-                        ficOut.write(lines)
                         f.close()
+                        
+                        lines=lines.split("\n")
+                        for line in lines:
+                            if (line[16:22] == "$GNGGA"):
+                                    ggaLines.append(line)
                     else:
                         break
                 except:
-                    print("err")
-            ficOut.close()
+                    print("gpxConvert except")
 
             # Convertir en GPX le fichier compilé puis le sumprimer
             #
-            gp.AnalyzeNmeaFile(compil)
-            os.remove(compil)
+            head, tail = os.path.split(fName)
+            nmeaAnalyzeFile(ggaLines,tail.split(".")[0] )
     Trace(trc_OUT, sys._getframe().f_code.co_name)
-
 
 # =======================================================================
 # MAIN
 # -----------------------------------------------------------------------
 #
-txCounter = 0
-lcd.setRGB(120, 120, 120)
+lcdSetColor("INIT")
 Trace(trc_IN, sys._getframe().f_code.co_name)
 jrn = datetime.now()
 Trace(trc_MSG, "START: " + str(jrn))
-readINI()
-Init_LCD()
+iniRead()
+lcdInit()
 lcd.clear()
-CustomChar()
+lcdCustomChar()
+
+glbInitRTKok=False
 
 l1 = "Rover RTK v" + _version
 l2 = "Initialisation..."
@@ -839,15 +1155,8 @@ jrn = format("> Main: [%s] [%s]" % (l1, l2))
 Trace(trc_MSG, jrn)
 
 Trace(trc_MSG, os.getcwd())
-rtkGetBaseList("toto")
-
-rtkGetNearestBase("toto")
-jrn = format("Point [%s] Index [%d] Dist [%f]  GGA [%d]" % (basePoint, baseIndex, baseDist, 1))
-Trace(trc_MSG, jrn)
-threadBase = threading.Thread(target=rtkBaseConnect, args=(1,))
-threadBase.start()
-
-time.sleep(5)
+glbNetworkOk=False
+time.sleep(2)
 
 dt = datetime.now().strftime("%Y%m%d_%Hh%M")
 nmeaFileCtr = 0
@@ -855,7 +1164,7 @@ nmeaFileBase = dt
 nmeaPath = format("%s/nmea/nmea-%s.%03d" % (glbRootPath, nmeaFileBase, nmeaFileCtr))
 loopCtr = 0
 nmeaData = ""
-
+screenCtr=0
 tmDeb = time.time()
 while (not glbSortir):  # Tourne 10h
     loopCtr = loopCtr + 1
@@ -866,11 +1175,32 @@ while (not glbSortir):  # Tourne 10h
             tglScreen = True
 
     # --------------------------------------------------------------------
+    # Tous les 20 toours, essayer de d'etablir la connexion si internet est dispo
+    #
+    if (not glbInitRTKok):
+        if ((loopCtr % 20) == 0):
+            glbNetworkOk = rtkPing(cstIP)
+            if (glbNetworkOk):
+                Trace(trc_MSG, "Reseau disponible - Tentative de connexion")
+                rtkGetBaseList("toto")
+            
+                rtkGetNearestBase("toto")
+                jrn = format("Point [%s] Index [%d] Dist [%f]  GGA [%d]" % (basePoint, baseIndex, baseDist, 1))
+                Trace(trc_MSG, jrn)
+            
+                threadBase = threading.Thread(target=rtkBaseConnect, args=(1,))
+                threadBase.start()
+                glbInitRTKok = True
+            else:
+                lcdSetColor("ERR")
+                Trace(trc_MSG, "Reseau non disponible")
+            
+    # --------------------------------------------------------------------
     # Detection et ouverture du port serie si non fait
     #
     if not serOpen:
         try:
-            serPath = SearchUSBport()
+            serPath = sysListUsbPort()
             if (len(serPath) > 0):
                 Trace(trc_MSG, "Essai ouverture [" + serPath + "]")
                 serPort = serial.Serial(port=serPath,
@@ -893,7 +1223,7 @@ while (not glbSortir):  # Tourne 10h
                 Trace(trc_MSG, "> Main: [" + l1 + "] [" + l2 + "]")
         except Exception as e:
             Trace(trc_MSG, sys._getframe().f_code.co_name + " serOpen exception [" + repr(e) + "]")
-            lcd.setRGB(0, 0, 120)
+            lcdSetColor("ERR")
             serOpen = False
 
     # --------------------------------------------------------------------
@@ -905,11 +1235,18 @@ while (not glbSortir):  # Tourne 10h
                 nmeaData = serPort.readline().strip()
                 nmeaData = nmeaData.decode('utf-8')
                 codes = nmeaData.split(",")
-                if len(codes) > 1:
+                if len(codes) ==15:
                     code = nmeaData.split(",")[0]
                     if (code[3:] == "GGA"):
-                        # DecodeGGA("$GNGGA,122220.00,4544.6212848,N,00450.0667166,E,2,12,0.60,188.552,M,47.358,M,,0136*4A")
-                        DecodeGGA(nmeaData)
+                        #DecodeGGA("$GNGGA,122220.00,4544.6212848,N,00450.0667166,E,2,12,0.60,188.552,M,47.358,M,,0136*4A")
+                        #DecodeGGA("$GNGGA,162751.00,4544.2102572,N,00450.2481150,E,1,08,1.08,183.811,M,47.359,M,,*41")
+                        #DecodeGGA("$GNGGA,170114.00,4544.7316508,N,00450.1543676,E,2,12,0.83,167.853,M,47.358,M,1.0,0000*6D")
+                        #DecodeGGA("$GNGGA,170013.00,4544.7591099,N,00450.3822994,E,4,12,0.70,168.461,M,47.357,M,1.0,0000*63")
+                        if (nmeaCalculChecksun(nmeaData)):
+                            #DecodeGGA("$GNGGA,170029.00,4544.7402366,N,00450.3358654,E,5,12,0.70,168.775,M,47.357,M,1.0,0000*60")
+                            DecodeGGA(nmeaData)
+                        else:
+                            Trace(trc_MSG, "Erreur de checksum - GGA non parsée")
         except Exception as e:
             Trace(trc_MSG, sys._getframe().f_code.co_name + " readline exception [" + repr(e) + "]")
             # serOpen=False
@@ -921,43 +1258,33 @@ while (not glbSortir):  # Tourne 10h
         else:
             break
     if (len(glbRcv) > 0):
-        # txCounter=txCounter+len(glbRcv)
-        txCounter = txCounter + serPort.write(glbRcv)
-        jrn = format("RS: Renvoi vers F9P : [%d] bytes,  Total [%d ko]" % (len(glbRcv), int(txCounter / 1024)))
+        # glbUSBcounter=glbUSBcounter+len(glbRcv)
+        glbUSBcounter = glbUSBcounter + serPort.write(glbRcv)
+        jrn = format("RS: Renvoi vers F9P : [%d] bytes,  Total [%d ko]" % (len(glbRcv), int(glbUSBcounter / 1024)))
         Trace(trc_MSG, jrn)
         glbRcv = []
 
     # --------------------------------------------------------------------
     # Detection si bouton presse
     #
-    lcd_key = read_LCD_buttons()  # Reading keys
+    lcd_key = lcdReadButton()
     if (lcd_key == btnRIGHT):
-        lcd.setRGB(40, 40, 40)
+        sysWifiStatus()
     elif (lcd_key == btnLEFT):
+        sysBwUsed()
         #
         # GAUCHE=lancer/arreter la capture des trames
         #
-        lcd.clear()
-        lcd.setCursor(0, 0)
-        if logToggle:
-            Trace(trc_MSG, "Recording OFF")
-            logToggle = False
-            lcd.printout("Recording OFF")
-        else:
-            Trace(trc_MSG, "Recording ON")
-            logToggle = True
-            lcd.printout("Recording ON")
     elif (lcd_key == btnUP):
         #
         # UP=infos system
         #
-        InfoSys()
-
+        sysGetOsInfos()
     elif (lcd_key == btnDOWN):
         #
         # DOWN=affichage adresses IP wifi et eth
         #
-        GetIPaddress()
+        sysGetIPaddress()
     elif (lcd_key == btnUP+btnDOWN):
         Trace(trc_MSG, "up+down")
         glbSortir = True
@@ -967,16 +1294,6 @@ while (not glbSortir):  # Tourne 10h
         # RIGHT=Quitter l'appli
         #
         glbSortir = True
-
-        # import os
-        # os.system("shutdown now +2")
-        # print("A") if a > b else print("B")
-        # >>> hex(a)
-        # '0xf0'
-        # >>> hex(b)
-        # '0x3f'
-        # >>> hex(a&b)
-        # '0x30'
         # fmt='{};{};{}'
         # fmt.format(111,22222222222222222222,333)
         # '111;22222222222222222222;333'
@@ -1036,7 +1353,7 @@ while (not glbSortir):  # Tourne 10h
             nmeaFileCtr = nmeaFileCtr + 1
             nmeaPath = format("%s/nmea/nmea-%s.%03d" % (glbRootPath, nmeaFileBase, nmeaFileCtr))
         TramesNMEA = []
-        writeINI()
+        iniWrite()
     # --------------------------------------------------------------------
     # Infos periodiques
     #
@@ -1045,11 +1362,18 @@ while (not glbSortir):  # Tourne 10h
         if (int((tmFin - tmDeb) / 60) > glbDureeMax):
             Trace(trc_MSG, "Durée de fonctionnement max atteinte (" + str(glbDureeMax) + " mn)")
             glbSortir = True
-
-        if tglScreen:
-            InfoSys()
-        else:
-            GetIPaddress()
+    
+    if ((loopCtr % 40) == 0):
+        if screenCtr==0:
+            sysGetOsInfos()
+        elif screenCtr==1:
+            sysGetIPaddress()
+        elif screenCtr==2:
+            sysWifiStatus()
+        elif screenCtr>=3:
+            sysBwUsed()
+            screenCtr = 0
+        screenCtr=screenCtr+1
 
     # --------------------------------------------------------------------
     # Fin de boucle
@@ -1064,7 +1388,7 @@ while (not glbSortir):  # Tourne 10h
 #                                   Fin
 # =======================================================================
 
-lcd.setRGB(40, 40, 40)
+lcdSetColor("INIT")
 Trace(trc_MSG, "Exit")
 
 # Sauvegarde du reliquat de log si active
@@ -1075,14 +1399,6 @@ if logToggle:
             nmeaHdlr.write("\n" + item)
     nmeaHdlr.close()
 
-l1 = "*** Exit **"
-l2 = "Parsing logs..."
-lcd.clear()
-lcd.setCursor(0, 0)
-lcd.printout(l1)
-lcd.setCursor(0, 1)
-lcd.printout(l2)
-Trace(trc_MSG, "[" + l1 + "] [" + l2 + "]")
 
 # trafic BASE->PI3 : 5000ko en 60mn -> ~83ko/mn
 # trafic PI3->F9P  :
