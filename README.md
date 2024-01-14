@@ -7,19 +7,26 @@
 * Ecran 2x16 LCD RGB (https://www.gotronic.fr/art-afficheur-lcd-i2c-2x16-hat-dfr0514-30630.htm)<br>
 ![Ecran 2x16 LCD RGB](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd.jpg)
 * Boitier recup (20x20x7)<br>
-![Boitier recup (20x20x7)](http://blueb.fr/RTK/docs/Photos/github/reduced/Boitier-A.jpg)
+![Boitier recup (20x20x7)](http://blueb.fr/RTK/docs/Photos/github/reduced/boitier2-A.jpg)
 
 +Powerbank 20k<br>
 
 Sur le CLD, en alternance :
-* [Latitude / Longitude]  -  [NombreSat / FixType]
-* [Latitude / Longitude]  -  [Altitude / HDop]<br>
-![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd-sat.jpg)
-![lcd-hdop](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd-hdop.jpg)
-* [IP Wifi]  -  [IP filaire]
+
+* [Latitude / Longitude]  -  [Altitude / HDop]
+* [NbSat / Fix]  - [Base / Distance]<br>
+![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-lat.jpg)
+![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-fix.jpg)
+
+* [IP Wifi] - [IP filaire]
+* [Flags reseau]  -  [SSID]<br>
+![lcd-ip](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-ip.jpg)
+![lcd-ip](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-ssid.jpg)
+
+* [Transfert USB]  - [Transfert TCT]
 * [%CPU / %MEM]  -  [Temperature / Frequence]<br>
-![lcd-ip](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd-ip.jpg)
-![lcd-sys](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd-sys.jpg)
+![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-debit.jpg)
+![lcd-sys](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-sys.jpg)
 
 Après conversion des trames GGA en GPX:<br>
 ![Rendu OSM](http://blueb.fr/RTK/docs/Photos/github/reduced/osm.png)
