@@ -1,5 +1,7 @@
-# rtk-rover
+# **rtk-rover**
 
+## Constitution du rover:
+Le rover est composé des éléments suivants:
 * Recepteur GNSS (https://www.ardusimple.com/product/simplertk2blite-bt-case-kit/)<br>
 ![Recepteur GNSS](http://blueb.fr/RTK/docs/Photos/github/reduced/antenne.jpg)
 * Rasbperry Pi3B+ (https://www.gotronic.fr/art-carte-raspberry-pi-3-b-27826.htm)<br>
@@ -11,7 +13,7 @@
 
 +Powerbank 20k<br>
 
-# Principe:
+## Principe:
 ![principe](http://blueb.fr/RTK/docs/github/RTK-v1.png)
 
 Trames RTCM v3 recues de la base et à renvoyer vers la puce F9P:
@@ -32,30 +34,35 @@ Trames RTCM v3 recues de la base et à renvoyer vers la puce F9P:
 09:24:29.548 INFO: * rtcm_Decode [1107]   152 messages (1107 SBAS MSM7) 
 09:24:29.548 INFO: * rtcm_Decode [1127]   151 messages (1127 BeiDou MSM7) 
 ```
-Sur le CLD, en alternance :
+## Interface utilisateur:
+Sur le LCD, en alternance :
+|         |            |
+| ------------- |-------------| 
+| Lancement |  |
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-INIT.jpg)     |  | 
+| Synchro NTP  |  |
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-NTPIN.jpg)    | ![lcd-sys](http://blueb.fr/RTK/docs/github/LCDv2/LCD-NTPOUT.jpg)| 
+| [Latitude / Longitude] - [Altitude / HDop]<br>                     | [NbSat / Fix] - [Base / Distance] |
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-LATLON.jpg)   | ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-BASE.jpg)  |
+| [IP Wifi] - [IP filaire]                                           | [Flags réseau] - [SSID] |
+| ![lcd-ip](http://blueb.fr/RTK/docs/github/LCDv2/LCD-IP.jpg)        | ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-SSID.jpg) |
+| [Transfert USB] - [Transfert TCP/IP]                               | [%CPU / %MEM] - [Temperature / Frequence]|
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-TRAFIC.jpg)   | ![lcd-sys](http://blueb.fr/RTK/docs/github/LCDv2/LCD-CPU.jpg) |
+| [NbSat GALILEO/GPS] - [NbSat BEIDOU/GLONASS]                       | |
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-CONST.jpg)    | |
+| Dump RTCM                                                          | Génération GPX                                  |
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-RTCM.jpg)     | ![lcd-sys](http://blueb.fr/RTK/docs/github/LCDv2/LCD-GPX.jpg) | 
+| Fin de programme                                                   |                                  |
+| ![lcd-sat](http://blueb.fr/RTK/docs/github/LCDv2/LCD-END.jpg)      | | 
 
-* [Latitude / Longitude]  -  [Altitude / HDop]
-* [NbSat / Fix]  - [Base / Distance]<br>
-![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-lat.jpg)
-![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-fix.jpg)
-
-* [IP Wifi] - [IP filaire]
-* [Flags reseau]  -  [SSID]<br>
-![lcd-ip](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-ip.jpg)
-![lcd-ip](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-ssid.jpg)
-
-* [Transfert USB]  - [Transfert TCT]
-* [%CPU / %MEM]  -  [Temperature / Frequence]<br>
-![lcd-sat](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-debit.jpg)
-![lcd-sys](http://blueb.fr/RTK/docs/Photos/github/reduced/lcd2-sys.jpg)
-
+## Fichiers générés:
 Après conversion des trames GGA en GPX:<br>
 ![Rendu OSM](http://blueb.fr/RTK/docs/Photos/github/reduced/osm.png)
 
-# Comparaison avec GPS simple:
-Exemple de rendu comparé d'un GPX du compteur vélo et celui du du rover:<br>
+## Comparaison avec GPS simple:
+Exemple de rendu comparé d'un GPX du compteur vélo et celui du du rover: capture de 4 passages en roulant sur une ligne sol precise<br>
 ![Rendu OSM](http://blueb.fr/RTK/docs/github/CompareGPS-RTK.png)
 
-# Autres setup RTK:
+## Autres setup RTK possibles:
 ![principe](http://blueb.fr/RTK/docs/github/RTK-v2.png)
 ![principe](http://blueb.fr/RTK/docs/github/RTK-v3.png)
