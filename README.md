@@ -15,24 +15,62 @@ Le rover est composé des éléments suivants:
 
 ## Principe:
 ![principe](http://blueb.fr/RTK/docs/github/RTK-v1.png)
+[Uploading debug.0…]()
 
+## Statistiques GNSS:
+Types de trames NMEA recues:
+```
++--------+---------+---------+ 
+| type   | records |     %   | 
++--------+---------+---------+ 
+| -----  |       0 |   0.00% | 
+| GNGST  |     207 |   5.23% | 
+| GNGGA  |     208 |   5.26% | 
+| GNGSA  |    1038 |  26.25% | 
+| GAGSV  |     401 |  10.14% | 
+| GBGSV  |     424 |  10.72% | 
+| GLGSV  |     713 |  18.03% | 
+| GPGSV  |     549 |  13.88% | 
+| GQGSV  |     207 |   5.23% | 
+| GNRMC  |     208 |   5.26% | 
+| GNTXT  |       0 |   0.00% | 
+| GNVTG  |       0 |   0.00% | 
+| GNGLL  |       0 |   0.00% | 
+```
+Types de fix GNSS:
+```
++------+---------+---------+ 
+| fix  | records |    %    | 
++------+---------+---------+ 
+| NOFX |       0 |  --.--% | 
+| GPS  |       0 |  --.--% | 
+| DGPS |       0 |  --.--% | 
+| N/A  |       0 |  --.--% | 
+| RTKx |       0 |  --.--% | 
+| RTKf |       0 |  --.--% | 
+| INS  |       0 |  --.--% | 
+```
 Trames RTCM v3 recues de la base et à renvoyer vers la puce F9P:
 ```
-09:24:29.538 INFO: * rtcm_Decode [1004]   151 messages (1004 Extended L1&L2 GPS RTK Observables for GPS RTK Use, the main msg ) 
-09:24:29.539 INFO: * rtcm_Decode [1005]    15 messages (1005 Stationary RTK Reference Station ARP ) 
-09:24:29.539 INFO: * rtcm_Decode [1006]     5 messages (1006 Stationary RTK Reference Station ARP plus the Antenna Height ) 
-09:24:29.540 INFO: * rtcm_Decode [1008]    15 messages (1007 Antenna Descriptor (msg 1008 (X) is also commonly used)) 
-09:24:29.540 INFO: * rtcm_Decode [1012]   152 messages (1012 Extended L1&L2 GLONASS RTK Observables, the other main msg ) 
-09:24:29.541 INFO: * rtcm_Decode [1019]    54 messages (1019 GPS Broadcast Ephemeris (orbits) ) 
-09:24:29.542 INFO: * rtcm_Decode [1020]    78 messages (1020 GLONASS Broadcast Ephemeris (orbits) ) 
-09:24:29.542 INFO: * rtcm_Decode [1033]    15 messages (1033 Receiver and Antenna Descriptors) 
-09:24:29.543 INFO: * rtcm_Decode [1042]    50 messages (1042 BDS Satellite Ephemeris Data) 
-09:24:29.544 INFO: * rtcm_Decode [1046]    60 messages (1046 Galileo I/NAV Satellite Ephemeris Data) 
-09:24:29.545 INFO: * rtcm_Decode [1077]   152 messages (1077 GPS MSM7) 
-09:24:29.546 INFO: * rtcm_Decode [1087]   152 messages (1087 GLONASS MSM7) 
-09:24:29.547 INFO: * rtcm_Decode [1097]   152 messages (1097 Galileo MSM7) 
-09:24:29.548 INFO: * rtcm_Decode [1107]   152 messages (1107 SBAS MSM7) 
-09:24:29.548 INFO: * rtcm_Decode [1127]   151 messages (1127 BeiDou MSM7) 
++------+---------+--------+--------+--------------------- 
+| code | msg/min |    %   | nombre | clair message 
++------+---------+--------+--------+--------------------- 
+| 1004 |   59.23 | 11.09% |    153 | Extended L1&L2 GPS RTK Observables for GPS RTK Use, the main msg 
+| 1005 |   05.81 | 01.09% |     15 | Stationary RTK Reference Station ARP  
+| 1006 |   01.94 | 00.36% |      5 | Stationary RTK Reference Station ARP plus the Antenna Height  
+| 1008 |   05.81 | 01.09% |     15 | Antenna Descriptor and Serial Number 
+| 1012 |   59.61 | 11.16% |    154 | Extended L1&L2 GLONASS RTK Observables, the other main msg  
+| 1019 |   18.19 | 03.41% |     47 | GPS Broadcast Ephemeris (orbits)  
+| 1020 |   27.87 | 05.22% |     72 | GLONASS Broadcast Ephemeris (orbits)  
+| 1033 |   05.81 | 01.09% |     15 | Receiver and Antenna Descriptors 
+| 1042 |   24.00 | 04.49% |     62 | BDS Satellite Ephemeris Data 
+| 1046 |   25.94 | 04.86% |     67 | Galileo I/NAV Satellite Ephemeris Data 
+| 1077 |   59.61 | 11.16% |    154 | GPS MSM7 
+| 1087 |   59.61 | 11.16% |    154 | GLONASS MSM7 
+| 1097 |   59.61 | 11.16% |    154 | Galileo MSM7 
+| 1107 |   59.61 | 11.16% |    154 | SBAS MSM7 
+| 1127 |   59.61 | 11.16% |    154 | BeiDou MSM7 
+| 1230 |   01.94 | 00.36% |      5 | GLONASS L1 and L2 Code-Phase Biases 
 ```
 ## Interface utilisateur:
 Sur le LCD, en alternance :
