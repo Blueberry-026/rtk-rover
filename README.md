@@ -15,62 +15,62 @@ Le rover est composé des éléments suivants:
 
 ## Principe:
 ![principe](http://blueb.fr/RTK/docs/github/RTK-v1.png)
-[Uploading debug.0…]()
 
 ## Statistiques GNSS:
 Types de trames NMEA recues (sur 1h):
 ```
-+--------+---------+---------+
-| type   | records |     %   |
-+--------+---------+---------+
-| -----  |       0 |   0.00% |
-| GNGST  |    3693 |   4.33% |
-| GNGGA  |    3695 |   4.34% |
-| GNGSA  |   18467 |  21.67% |
-| GAGSV  |    9797 |  11.50% |
-| GBGSV  |   15409 |  18.08% |
-| GLGSV  |   10785 |  12.66% |
-| GPGSV  |   15974 |  18.75% |
-| GQGSV  |    3693 |   4.33% |
-| GNRMC  |    3695 |   4.34% |
-| GNTXT  |       0 |   0.00% |
-| GNVTG  |       0 |   0.00% |
-| GNGLL  |       0 |   0.00% |
++--------+---------+--------+ 
+| NMEA   | records |    %   | 
++--------+---------+--------+ 
+| -----  |       0 |  0.00% | 
+| GNGST  |    3686 |  4.39% | 
+| GNGGA  |    3687 |  4.39% | 
+| GNGSA  |   18432 | 21.95% | 
+| GAGSV  |   12474 | 14.85% | 
+| GBGSV  |   11756 | 14.00% | 
+| GLGSV  |   11986 | 14.27% | 
+| GPGSV  |   14596 | 17.38% | 
+| GQGSV  |    3686 |  4.39% | 
+| GNRMC  |    3687 |  4.39% | 
+| GNTXT  |       0 |  0.00% | 
+| GNVTG  |       0 |  0.00% | 
+| GNGLL  |       0 |  0.00% | 
 ```
 Types de fix GNSS (sur 1h):
 ```
-+------+---------+---------+
-| fix  | records |    %    |
-+------+---------+---------+
-| NOFX |       0 |   0.00% |
-| GPS  |       0 |   0.00% |
-| DGPS |      14 |   0.38% |
-| N/A  |       0 |   0.00% |
-| RTKx |       0 |   0.00% |
-| RTKf |    3681 |  99.62% |
-| INS  |       0 |   0.00% |
++------+---------+--------+
+| FIX  | records |    %   |
++------+---------+--------+
+| NOFX |       0 |  0.00% | 
+| GPS  |       5 |  0.14% | 
+| DGPS |      80 |  2.18% | 
+| N/A  |       0 |  0.00% | 
+| RTKx |     878 | 23.91% | 
+| RTKf |    2709 | 73.77% | 
+| INS  |       0 |  0.00% | 
 ```
 Trames RTCM v3 recues de la base et à renvoyer vers la puce F9P (sur 1h):
 ```
-+------+---------+--------+--------+---------------------
-| code | msg/min |    %   | nombre | clair message
-+------+---------+--------+--------+---------------------
-| 1004 |   58.36 | 11.08% |    142 | Extended L1&L2 GPS RTK Observables for GPS RTK Use, the main msg 
-| 1005 |   05.75 | 01.09% |     14 | Stationary RTK Reference Station ARP 
-| 1006 |   02.05 | 00.39% |      5 | Stationary RTK Reference Station ARP plus the Antenna Height 
-| 1008 |   05.75 | 01.09% |     14 | Antenna Descriptor and Serial Number
-| 1012 |   58.77 | 11.15% |    143 | Extended L1&L2 GLONASS RTK Observables, the other main msg 
-| 1019 |   24.66 | 04.68% |     60 | GPS Broadcast Ephemeris (orbits) 
-| 1020 |   25.48 | 04.84% |     62 | GLONASS Broadcast Ephemeris (orbits) 
-| 1033 |   05.75 | 01.09% |     14 | Receiver and Antenna Descriptors
-| 1042 |   22.60 | 04.29% |     55 | BDS Satellite Ephemeris Data
-| 1046 |   22.19 | 04.21% |     54 | Galileo I/NAV Satellite Ephemeris Data
-| 1077 |   58.77 | 11.15% |    143 | GPS MSM7
-| 1087 |   58.77 | 11.15% |    143 | GLONASS MSM7
-| 1097 |   58.77 | 11.15% |    143 | Galileo MSM7
-| 1107 |   58.77 | 11.15% |    143 | SBAS MSM7
-| 1127 |   58.36 | 11.08% |    142 | BeiDou MSM7
-| 1230 |   02.05 | 00.39% |      5 | GLONASS L1 and L2 Code-Phase Biases
++------+---------+--------+---------+--------------------- 
+| RTCM | records |    %   | msg/min | clair message 
++------+---------+--------+---------+--------------------- 
+| 1004 |    137  | 10.84% | 58.71 | Extended L1&L2 GPS RTK Observables for GPS RTK Use, the main msg  
+| 1005 |     13  |  1.03% |  5.57 | Stationary RTK Reference Station ARP  
+| 1006 |      5  |  0.40% |  2.14 | Stationary RTK Reference Station ARP plus the Antenna Height  
+| 1008 |     13  |  1.03% |  5.57 | Antenna Descriptor and Serial Number 
+| 1012 |    138  | 10.92% | 59.14 | Extended L1&L2 GLONASS RTK Observables, the other main msg  
+| 1019 |     44  |  3.48% | 18.86 | GPS Broadcast Ephemeris (orbits)  
+| 1020 |     81  |  6.41% | 34.71 | GLONASS Broadcast Ephemeris (orbits)  
+| 1033 |     13  |  1.03% |  5.57 | Receiver and Antenna Descriptors 
+| 1042 |     48  |  3.80% | 20.57 | BDS Satellite Ephemeris Data 
+| 1046 |     78  |  6.17% | 33.43 | Galileo I/NAV Satellite Ephemeris Data 
+| 1077 |    138  | 10.92% | 59.14 | GPS MSM7 
+| 1087 |    138  | 10.92% | 59.14 | GLONASS MSM7 
+| 1097 |    138  | 10.92% | 59.14 | Galileo MSM7 
+| 1107 |    138  | 10.92% | 59.14 | SBAS MSM7 
+| 1127 |    137  | 10.84% | 58.71 | BeiDou MSM7 
+| 1230 |      5  |  0.40% |  2.14 | GLONASS L1 and L2 Code-Phase Biases 
+totalRtcm [1264] rtcmDuration [140] 
 ```
 ## Interface utilisateur:
 Sur le LCD, en alternance :
