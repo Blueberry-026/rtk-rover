@@ -1,4 +1,4 @@
-# **rtk-rover**
+# **Rover RTK - Localisation GNSS centimetrique**
 
 ## Constitution du rover:
 Le rover est composé des éléments suivants:
