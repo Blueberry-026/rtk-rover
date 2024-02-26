@@ -1,5 +1,15 @@
 # **Rover RTK - Localisation GNSS centimetrique**
 
+## Principe du réseau RTK Centipede
+
+Guides et tutos
+* https://docs.centipede.fr/<br>
+* https://geotribu.fr/articles/2023/2023-09-09_tutoriel-geolocalisation-haute-precision/<br>
+* https://docs.centipede.fr/docs/centipede/1_faq.html<br>
+
+Video
+* https://www.youtube.com/watch?v=gTMEe4CBmTg<br>
+
 ## Constitution du rover:
 Le rover est composé des éléments suivants:
 * Recepteur GNSS (https://www.ardusimple.com/product/simplertk2blite-bt-case-kit/)<br>
